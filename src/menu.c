@@ -173,7 +173,7 @@ static int prompt_int_at(int row, const char *label, int *out)
         } else if ((pos < 5 && ch >= '0' && ch <= '9') ||
                    (pos == 0 && ch == '-')) {
             buf[pos++] = (char)ch;
-            waddch(win_cmd, (chtype)ch);
+            /* echo() already displays the char — do NOT call waddch() too */
             wrefresh(win_cmd);
         }
     }
@@ -279,7 +279,7 @@ static void do_add(void)
 {
     /* Step 1: pick shape type with arrow keys */
     int choice = 0;
-    if (!pick_from_list("ADD SHAPE — choose type", shape_labels, 4, &choice)) {
+    if (!pick_from_list("ADD SHAPE - choose type", shape_labels, 4, &choice)) {
         status_msg("Add cancelled.");
         return;
     }
@@ -288,7 +288,7 @@ static void do_add(void)
     /* Step 2: enter parameters — each on its own row */
     werase(win_cmd);
     box(win_cmd, 0, 0);
-    mvwprintw(win_cmd, 0, 2, " ADD: %s — enter coordinates ",
+    mvwprintw(win_cmd, 0, 2, " ADD: %s - enter coordinates ",
               shape_name(stype));
     wrefresh(win_cmd);
 
@@ -404,7 +404,7 @@ static void do_modify(void)
 
     werase(win_cmd);
     box(win_cmd, 0, 0);
-    mvwprintw(win_cmd, 0, 2, " MODIFY ID %d: %s — new coordinates ",
+    mvwprintw(win_cmd, 0, 2, " MODIFY ID %d: %s - new coordinates ",
               id, shape_name(orig->type));
     wrefresh(win_cmd);
 
