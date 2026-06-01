@@ -53,15 +53,20 @@ void menu_init(void)
     int max_r, max_c;
     getmaxyx(stdscr, max_r, max_c);
 
-    int need_rows = TITLE_ROWS + ROWS + 2 + STATUS_ROWS + CMD_ROWS;
-    int need_cols = COLS + 2;
-    if (max_r < need_rows || max_c < need_cols) {
+    /* Enforce a minimum screen size to fit CMD window (10 rows), title, status, borders */
+    if (max_r < 24 || max_c < 80) {
         endwin();
         printf("ERROR: Terminal too small!\n");
         printf("  Your terminal : %d rows x %d cols\n", max_r, max_c);
-        printf("  Minimum needed: %d rows x %d cols\n", need_rows, need_cols);
+        printf("  Minimum needed: 24 rows x 80 cols\n");
         exit(1);
     }
+
+    /* Dynamically calculate rows and cols to fill the screen */
+    ROWS = max_r - 14;
+    COLS = max_c - 2;
+
+    canvas_alloc(ROWS, COLS);
 
     win_title  = newwin(TITLE_ROWS, COLS + 2, 0, 0);
     wbkgd(win_title, COLOR_PAIR(1) | A_BOLD);
@@ -88,6 +93,7 @@ void menu_cleanup(void)
     if (win_canvas) { delwin(win_canvas); win_canvas = NULL; }
     if (win_title)  { delwin(win_title);  win_title  = NULL; }
     endwin();
+    canvas_free();
 }
 
 static void ui_refresh(void)
@@ -273,32 +279,54 @@ static void do_add(void)
     s.type      = stype;
     s.fill_char = '*';
 
+    int min_x = -COLS / 2;
+    int max_x = COLS - 1 - (COLS / 2);
+    int min_y = -(ROWS - 1 - (ROWS / 2));
+    int max_y = ROWS / 2;
+
+    char lx1[64], ly1[64], lx2[64], ly2[64], lx3[64], ly3[64];
     int ok = 1;
     switch (stype) {
     case CIRCLE:
-        ok = prompt_int_at(1, "Center col x (0-75)", &s.x1) &&
-             prompt_int_at(2, "Center row y (0-9)",  &s.y1) &&
-             prompt_int_at(3, "Radius",              &s.radius);
+        snprintf(lx1, sizeof(lx1), "Center col x (%d to %d)", min_x, max_x);
+        snprintf(ly1, sizeof(ly1), "Center row y (%d to %d)", min_y, max_y);
+        ok = prompt_int_at(1, lx1, &s.x1) &&
+             prompt_int_at(2, ly1, &s.y1) &&
+             prompt_int_at(3, "Radius", &s.radius);
         break;
     case RECTANGLE:
-        ok = prompt_int_at(1, "Top-left  x1 (0-75)", &s.x1) &&
-             prompt_int_at(2, "Top-left  y1 (0-9)",  &s.y1) &&
-             prompt_int_at(3, "Bot-right x2 (0-75)", &s.x2) &&
-             prompt_int_at(4, "Bot-right y2 (0-9)",  &s.y2);
+        snprintf(lx1, sizeof(lx1), "Top-left  x1 (%d to %d)", min_x, max_x);
+        snprintf(ly1, sizeof(ly1), "Top-left  y1 (%d to %d)", min_y, max_y);
+        snprintf(lx2, sizeof(lx2), "Bot-right x2 (%d to %d)", min_x, max_x);
+        snprintf(ly2, sizeof(ly2), "Bot-right y2 (%d to %d)", min_y, max_y);
+        ok = prompt_int_at(1, lx1, &s.x1) &&
+             prompt_int_at(2, ly1, &s.y1) &&
+             prompt_int_at(3, lx2, &s.x2) &&
+             prompt_int_at(4, ly2, &s.y2);
         break;
     case LINE:
-        ok = prompt_int_at(1, "Start x1 (0-75)", &s.x1) &&
-             prompt_int_at(2, "Start y1 (0-9)",  &s.y1) &&
-             prompt_int_at(3, "End   x2 (0-75)", &s.x2) &&
-             prompt_int_at(4, "End   y2 (0-9)",  &s.y2);
+        snprintf(lx1, sizeof(lx1), "Start x1 (%d to %d)", min_x, max_x);
+        snprintf(ly1, sizeof(ly1), "Start y1 (%d to %d)", min_y, max_y);
+        snprintf(lx2, sizeof(lx2), "End   x2 (%d to %d)", min_x, max_x);
+        snprintf(ly2, sizeof(ly2), "End   y2 (%d to %d)", min_y, max_y);
+        ok = prompt_int_at(1, lx1, &s.x1) &&
+             prompt_int_at(2, ly1, &s.y1) &&
+             prompt_int_at(3, lx2, &s.x2) &&
+             prompt_int_at(4, ly2, &s.y2);
         break;
     case TRIANGLE:
-        ok = prompt_int_at(1, "V1 x1 (0-75)", &s.x1) &&
-             prompt_int_at(2, "V1 y1 (0-9)",  &s.y1) &&
-             prompt_int_at(3, "V2 x2 (0-75)", &s.x2) &&
-             prompt_int_at(4, "V2 y2 (0-9)",  &s.y2) &&
-             prompt_int_at(5, "V3 x3 (0-75)", &s.x3) &&
-             prompt_int_at(6, "V3 y3 (0-9)",  &s.y3);
+        snprintf(lx1, sizeof(lx1), "V1 x1 (%d to %d)", min_x, max_x);
+        snprintf(ly1, sizeof(ly1), "V1 y1 (%d to %d)", min_y, max_y);
+        snprintf(lx2, sizeof(lx2), "V2 x2 (%d to %d)", min_x, max_x);
+        snprintf(ly2, sizeof(ly2), "V2 y2 (%d to %d)", min_y, max_y);
+        snprintf(lx3, sizeof(lx3), "V3 x3 (%d to %d)", min_x, max_x);
+        snprintf(ly3, sizeof(ly3), "V3 y3 (%d to %d)", min_y, max_y);
+        ok = prompt_int_at(1, lx1, &s.x1) &&
+             prompt_int_at(2, ly1, &s.y1) &&
+             prompt_int_at(3, lx2, &s.x2) &&
+             prompt_int_at(4, ly2, &s.y2) &&
+             prompt_int_at(5, lx3, &s.x3) &&
+             prompt_int_at(6, ly3, &s.y3);
         break;
     }
     if (!ok) { status_msg("Add cancelled."); return; }
@@ -376,32 +404,54 @@ static void do_modify(void)
               id, shape_name(orig->type));
     wrefresh(win_cmd);
 
+    int min_x = -COLS / 2;
+    int max_x = COLS - 1 - (COLS / 2);
+    int min_y = -(ROWS - 1 - (ROWS / 2));
+    int max_y = ROWS / 2;
+
+    char lx1[64], ly1[64], lx2[64], ly2[64], lx3[64], ly3[64];
     int ok = 1;
     switch (orig->type) {
     case CIRCLE:
-        ok = prompt_int_at(1, "New center col x", &updated.x1) &&
-             prompt_int_at(2, "New center row y", &updated.y1) &&
-             prompt_int_at(3, "New radius",       &updated.radius);
+        snprintf(lx1, sizeof(lx1), "New center col x (%d to %d)", min_x, max_x);
+        snprintf(ly1, sizeof(ly1), "New center row y (%d to %d)", min_y, max_y);
+        ok = prompt_int_at(1, lx1, &updated.x1) &&
+             prompt_int_at(2, ly1, &updated.y1) &&
+             prompt_int_at(3, "New radius", &updated.radius);
         break;
     case RECTANGLE:
-        ok = prompt_int_at(1, "New x1", &updated.x1) &&
-             prompt_int_at(2, "New y1", &updated.y1) &&
-             prompt_int_at(3, "New x2", &updated.x2) &&
-             prompt_int_at(4, "New y2", &updated.y2);
+        snprintf(lx1, sizeof(lx1), "New x1 (%d to %d)", min_x, max_x);
+        snprintf(ly1, sizeof(ly1), "New y1 (%d to %d)", min_y, max_y);
+        snprintf(lx2, sizeof(lx2), "New x2 (%d to %d)", min_x, max_x);
+        snprintf(ly2, sizeof(ly2), "New y2 (%d to %d)", min_y, max_y);
+        ok = prompt_int_at(1, lx1, &updated.x1) &&
+             prompt_int_at(2, ly1, &updated.y1) &&
+             prompt_int_at(3, lx2, &updated.x2) &&
+             prompt_int_at(4, ly2, &updated.y2);
         break;
     case LINE:
-        ok = prompt_int_at(1, "New x1", &updated.x1) &&
-             prompt_int_at(2, "New y1", &updated.y1) &&
-             prompt_int_at(3, "New x2", &updated.x2) &&
-             prompt_int_at(4, "New y2", &updated.y2);
+        snprintf(lx1, sizeof(lx1), "New x1 (%d to %d)", min_x, max_x);
+        snprintf(ly1, sizeof(ly1), "New y1 (%d to %d)", min_y, max_y);
+        snprintf(lx2, sizeof(lx2), "New x2 (%d to %d)", min_x, max_x);
+        snprintf(ly2, sizeof(ly2), "New y2 (%d to %d)", min_y, max_y);
+        ok = prompt_int_at(1, lx1, &updated.x1) &&
+             prompt_int_at(2, ly1, &updated.y1) &&
+             prompt_int_at(3, lx2, &updated.x2) &&
+             prompt_int_at(4, ly2, &updated.y2);
         break;
     case TRIANGLE:
-        ok = prompt_int_at(1, "New x1", &updated.x1) &&
-             prompt_int_at(2, "New y1", &updated.y1) &&
-             prompt_int_at(3, "New x2", &updated.x2) &&
-             prompt_int_at(4, "New y2", &updated.y2) &&
-             prompt_int_at(5, "New x3", &updated.x3) &&
-             prompt_int_at(6, "New y3", &updated.y3);
+        snprintf(lx1, sizeof(lx1), "New x1 (%d to %d)", min_x, max_x);
+        snprintf(ly1, sizeof(ly1), "New y1 (%d to %d)", min_y, max_y);
+        snprintf(lx2, sizeof(lx2), "New x2 (%d to %d)", min_x, max_x);
+        snprintf(ly2, sizeof(ly2), "New y2 (%d to %d)", min_y, max_y);
+        snprintf(lx3, sizeof(lx3), "New x3 (%d to %d)", min_x, max_x);
+        snprintf(ly3, sizeof(ly3), "New y3 (%d to %d)", min_y, max_y);
+        ok = prompt_int_at(1, lx1, &updated.x1) &&
+             prompt_int_at(2, ly1, &updated.y1) &&
+             prompt_int_at(3, lx2, &updated.x2) &&
+             prompt_int_at(4, ly2, &updated.y2) &&
+             prompt_int_at(5, lx3, &updated.x3) &&
+             prompt_int_at(6, ly3, &updated.y3);
         break;
     }
     if (!ok) { status_msg("Modify cancelled."); return; }

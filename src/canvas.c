@@ -2,30 +2,66 @@
 #include "objects.h"
 #include "shapes.h"
 #include <string.h>
+#include <stdlib.h>
 
-/* The global 2-D canvas */
-char canvas[ROWS][COLS];
+/* The global 2-D canvas dimensions and pointer */
+int ROWS = 10;
+int COLS = 76;
+char **canvas = NULL;
+
+/* ------------------------------------------------------------------ */
+void canvas_alloc(int rows, int cols)
+{
+    canvas_free();
+    ROWS = rows;
+    COLS = cols;
+    canvas = malloc(ROWS * sizeof(char *));
+    for (int r = 0; r < ROWS; r++) {
+        canvas[r] = malloc(COLS * sizeof(char));
+    }
+}
+
+void canvas_free(void)
+{
+    if (canvas != NULL) {
+        for (int r = 0; r < ROWS; r++) {
+            free(canvas[r]);
+        }
+        free(canvas);
+        canvas = NULL;
+    }
+}
 
 /* ------------------------------------------------------------------ */
 void canvas_init(void)
 {
+    if (canvas == NULL) return;
     for (int r = 0; r < ROWS; r++)
         for (int c = 0; c < COLS; c++)
             canvas[r][c] = ' ';
 }
 
 /* ------------------------------------------------------------------ */
+/* Maps Cartesian coordinates (row=y, col=x) to array indices:
+   r_idx = ROWS/2 - row
+   c_idx = COLS/2 + col */
 void canvas_set(int row, int col, char ch)
 {
-    if (row >= 0 && row < ROWS && col >= 0 && col < COLS)
-        canvas[row][col] = ch;
+    if (canvas == NULL) return;
+    int r_idx = (ROWS / 2) - row;
+    int c_idx = (COLS / 2) + col;
+    if (r_idx >= 0 && r_idx < ROWS && c_idx >= 0 && c_idx < COLS)
+        canvas[r_idx][c_idx] = ch;
 }
 
 /* ------------------------------------------------------------------ */
 char canvas_get(int row, int col)
 {
-    if (row >= 0 && row < ROWS && col >= 0 && col < COLS)
-        return canvas[row][col];
+    if (canvas == NULL) return ' ';
+    int r_idx = (ROWS / 2) - row;
+    int c_idx = (COLS / 2) + col;
+    if (r_idx >= 0 && r_idx < ROWS && c_idx >= 0 && c_idx < COLS)
+        return canvas[r_idx][c_idx];
     return ' ';
 }
 

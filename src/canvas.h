@@ -3,12 +3,16 @@
 
 #include <ncurses.h>
 
-#define ROWS    10
-#define COLS    76
+extern int ROWS;
+extern int COLS;
 #define BORDER_CHAR '|'
 
 /* The 2-D character canvas */
-extern char canvas[ROWS][COLS];
+extern char **canvas;
+
+/* Allocate and free the canvas dynamically */
+void canvas_alloc(int rows, int cols);
+void canvas_free(void);
 
 /* Canvas offset inside the ncurses window */
 #define CANVAS_WIN_ROW  2
