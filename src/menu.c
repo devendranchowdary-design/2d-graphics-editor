@@ -97,6 +97,7 @@ void menu_init(void)
     /* Command / input area */
     win_cmd = newwin(CMD_ROWS, COLS + 2, canvas_bottom + STATUS_ROWS, 0);
     wbkgd(win_cmd, COLOR_PAIR(2));
+    keypad(win_cmd, TRUE);   /* Enable arrow keys on the input window */
 
     canvas_init();
     ui_refresh();
