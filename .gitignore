@@ -1,0 +1,11 @@
+# Build artifacts
+src/*.o
+graphics_editor
+
+# macOS
+.DS_Store
+
+# Editor files
+*.swp
+*.swo
+*~
