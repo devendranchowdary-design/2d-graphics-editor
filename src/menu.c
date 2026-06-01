@@ -1,11 +1,5 @@
 /*
- * menu.c  —  ncurses-based interactive UI for the 2-D Graphics Editor
- *
- * Layout (fits standard 24x80 terminal):
- *   Title  (1 row)
- *   Canvas (ROWS+2 rows)
- *   Status (1 row)
- *   CMD    (CMD_ROWS rows)
+ * menu.c  -- ncurses UI for the 2-D Graphics Editor
  */
 
 #include "menu.h"
@@ -18,9 +12,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-/* ------------------------------------------------------------------ */
-/*  Window pointers                                                    */
-/* ------------------------------------------------------------------ */
 static WINDOW *win_title   = NULL;
 static WINDOW *win_canvas  = NULL;
 static WINDOW *win_status  = NULL;
@@ -29,10 +20,8 @@ static WINDOW *win_cmd     = NULL;
 #define TITLE_ROWS   1
 #define STATUS_ROWS  1
 #define CMD_ROWS     10
+#define INPUT_COL    32   /* column where typed digits appear */
 
-/* ------------------------------------------------------------------ */
-/*  Forward declarations                                               */
-/* ------------------------------------------------------------------ */
 static void ui_refresh(void);
 static void status_msg(const char *msg);
 static int  prompt_int_at(int row, const char *label, int *out);
@@ -44,9 +33,6 @@ static void do_modify(void);
 static void do_list(void);
 static void draw_main_menu(int selected);
 
-/* ================================================================== */
-/*  menu_init                                                          */
-/* ================================================================== */
 void menu_init(void)
 {
     initscr();
@@ -74,7 +60,6 @@ void menu_init(void)
         printf("ERROR: Terminal too small!\n");
         printf("  Your terminal : %d rows x %d cols\n", max_r, max_c);
         printf("  Minimum needed: %d rows x %d cols\n", need_rows, need_cols);
-        printf("Please resize your terminal window and try again.\n");
         exit(1);
     }
 
@@ -96,9 +81,6 @@ void menu_init(void)
     ui_refresh();
 }
 
-/* ================================================================== */
-/*  menu_cleanup                                                       */
-/* ================================================================== */
 void menu_cleanup(void)
 {
     if (win_cmd)    { delwin(win_cmd);    win_cmd    = NULL; }
@@ -108,9 +90,6 @@ void menu_cleanup(void)
     endwin();
 }
 
-/* ================================================================== */
-/*  ui_refresh                                                         */
-/* ================================================================== */
 static void ui_refresh(void)
 {
     werase(win_title);
@@ -128,9 +107,6 @@ static void ui_refresh(void)
     wrefresh(win_cmd);
 }
 
-/* ================================================================== */
-/*  status_msg                                                         */
-/* ================================================================== */
 static void status_msg(const char *msg)
 {
     werase(win_status);
@@ -138,71 +114,80 @@ static void status_msg(const char *msg)
     wrefresh(win_status);
 }
 
-/* ================================================================== */
-/*  prompt_int_at                                                      */
-/*  Draws label at a specific ROW in win_cmd, reads an integer there. */
-/*  Each call gets its own row — no overlap.                           */
-/*  Returns 1 on success, 0 on ESC.                                    */
-/* ================================================================== */
+/*
+ * prompt_int_at
+ * Draws the label at a fixed ROW; manually reads digits using mvwaddch.
+ * NO echo() -- we place each character at (row, INPUT_COL+pos) ourselves.
+ * Returns 1 on success, 0 on ESC or empty input.
+ */
 static int prompt_int_at(int row, const char *label, int *out)
 {
-    char buf[16] = {0};
-    int  pos     = 0;
-    int  label_len = (int)strlen(label) + 4;  /* "  label: " */
+    char buf[8];
+    int  pos = 0;
+    memset(buf, 0, sizeof(buf));
 
-    /* Draw label on its row */
-    mvwprintw(win_cmd, row, 2, "  %-24s: ", label);
-    wrefresh(win_cmd);
+    /* Draw label in a fixed 26-char field */
+    mvwprintw(win_cmd, row, 2, "  %-26s: ", label);
 
-    echo();
+    /* Place cursor at input start position */
     curs_set(1);
-    wmove(win_cmd, row, 2 + label_len);
+    wmove(win_cmd, row, INPUT_COL);
     wrefresh(win_cmd);
 
     int ch;
-    while ((ch = wgetch(win_cmd)) != '\n' && ch != KEY_ENTER) {
-        if (ch == 27) {                              /* ESC */
-            noecho(); curs_set(0); return 0;
+    for (;;) {
+        ch = wgetch(win_cmd);
+
+        if (ch == '\n' || ch == KEY_ENTER) break;
+
+        if (ch == 27) {                          /* ESC: cancel */
+            curs_set(0);
+            return 0;
         }
-        if ((ch == KEY_BACKSPACE || ch == 127) && pos > 0) {
-            buf[--pos] = '\0';
-            int cx = getcurx(win_cmd);
-            mvwaddch(win_cmd, row, cx - 1, ' ');
-            wmove(win_cmd, row, cx - 1);
+
+        if ((ch == KEY_BACKSPACE || ch == 127 || ch == 8) && pos > 0) {
+            pos--;
+            buf[pos] = '\0';
+            mvwaddch(win_cmd, row, INPUT_COL + pos, ' '); /* erase char */
+            wmove(win_cmd,   row, INPUT_COL + pos);       /* move back  */
             wrefresh(win_cmd);
-        } else if ((pos < 5 && ch >= '0' && ch <= '9') ||
-                   (pos == 0 && ch == '-')) {
-            buf[pos++] = (char)ch;
-            /* echo() already displays the char — do NOT call waddch() too */
+            continue;
+        }
+
+        if (pos < 5 && ((ch >= '0' && ch <= '9') || (pos == 0 && ch == '-'))) {
+            buf[pos] = (char)ch;
+            mvwaddch(win_cmd, row, INPUT_COL + pos, (chtype)ch); /* draw digit */
+            pos++;
+            wmove(win_cmd, row, INPUT_COL + pos);  /* advance cursor */
             wrefresh(win_cmd);
         }
     }
-    noecho();
-    curs_set(0);
 
+    curs_set(0);
     if (pos == 0) return 0;
+
     *out = atoi(buf);
 
-    /* Show entered value in green to confirm */
+    /* Show confirmed value in green */
     wattron(win_cmd, COLOR_PAIR(4) | A_BOLD);
-    mvwprintw(win_cmd, row, 2 + label_len, "%-6d", *out);
+    mvwprintw(win_cmd, row, INPUT_COL, "%-6d", *out);
     wattroff(win_cmd, COLOR_PAIR(4) | A_BOLD);
     wrefresh(win_cmd);
 
     return 1;
 }
 
-/* ================================================================== */
-/*  pick_from_list                                                     */
-/*  Arrow-key + number-key selectable list in win_cmd.                */
-/*  Returns 1 and sets *chosen (0-based) on Enter. 0 on ESC.          */
-/* ================================================================== */
+/*
+ * pick_from_list
+ * Shows items[] with arrow-key + number-key navigation.
+ * Returns 1 and sets *chosen (0-based) on Enter. 0 on ESC.
+ */
 static int pick_from_list(const char *title, const char **items,
                           int n, int *chosen)
 {
-    int sel = (*chosen < n) ? *chosen : 0;
+    int sel = (*chosen >= 0 && *chosen < n) ? *chosen : 0;
 
-    while (1) {
+    for (;;) {
         werase(win_cmd);
         box(win_cmd, 0, 0);
         mvwprintw(win_cmd, 0, 2, " %s ", title);
@@ -221,7 +206,7 @@ static int pick_from_list(const char *title, const char **items,
         wrefresh(win_cmd);
 
         int key = wgetch(win_cmd);
-        if (key == 27) return 0;
+        if (key == 27)                              return 0;
         if (key == KEY_UP)   sel = (sel - 1 + n) % n;
         if (key == KEY_DOWN) sel = (sel + 1) % n;
         if (key == '\n' || key == KEY_ENTER) { *chosen = sel; return 1; }
@@ -232,9 +217,6 @@ static int pick_from_list(const char *title, const char **items,
     }
 }
 
-/* ================================================================== */
-/*  draw_main_menu                                                     */
-/* ================================================================== */
 #define MENU_ITEMS 6
 static const char *menu_labels[MENU_ITEMS] = {
     "1. Add Shape",
@@ -265,9 +247,6 @@ static void draw_main_menu(int selected)
     wrefresh(win_cmd);
 }
 
-/* ================================================================== */
-/*  do_add                                                             */
-/* ================================================================== */
 static const char *shape_labels[4] = {
     "1. Circle", "2. Rectangle", "3. Line", "4. Triangle"
 };
@@ -277,7 +256,6 @@ static const char *fill_labels[2] = {
 
 static void do_add(void)
 {
-    /* Step 1: pick shape type with arrow keys */
     int choice = 0;
     if (!pick_from_list("ADD SHAPE - choose type", shape_labels, 4, &choice)) {
         status_msg("Add cancelled.");
@@ -285,11 +263,9 @@ static void do_add(void)
     }
     ShapeType stype = (ShapeType)choice;
 
-    /* Step 2: enter parameters — each on its own row */
     werase(win_cmd);
     box(win_cmd, 0, 0);
-    mvwprintw(win_cmd, 0, 2, " ADD: %s - enter coordinates ",
-              shape_name(stype));
+    mvwprintw(win_cmd, 0, 2, " ADD: %s - enter coordinates ", shape_name(stype));
     wrefresh(win_cmd);
 
     Shape s;
@@ -300,7 +276,6 @@ static void do_add(void)
     int ok = 1;
     switch (stype) {
     case CIRCLE:
-        /* rows 1, 2, 3 — one per field */
         ok = prompt_int_at(1, "Center col x (0-75)", &s.x1) &&
              prompt_int_at(2, "Center row y (0-9)",  &s.y1) &&
              prompt_int_at(3, "Radius",              &s.radius);
@@ -328,7 +303,6 @@ static void do_add(void)
     }
     if (!ok) { status_msg("Add cancelled."); return; }
 
-    /* Step 3: pick fill char */
     int fc = 0;
     if (!pick_from_list("Choose fill character", fill_labels, 2, &fc)) {
         status_msg("Add cancelled.");
@@ -357,9 +331,6 @@ static void do_add(void)
     ui_refresh();
 }
 
-/* ================================================================== */
-/*  do_delete                                                          */
-/* ================================================================== */
 static void do_delete(void)
 {
     werase(win_cmd);
@@ -382,9 +353,6 @@ static void do_delete(void)
     ui_refresh();
 }
 
-/* ================================================================== */
-/*  do_modify                                                          */
-/* ================================================================== */
 static void do_modify(void)
 {
     werase(win_cmd);
@@ -404,7 +372,7 @@ static void do_modify(void)
 
     werase(win_cmd);
     box(win_cmd, 0, 0);
-    mvwprintw(win_cmd, 0, 2, " MODIFY ID %d: %s - new coordinates ",
+    mvwprintw(win_cmd, 0, 2, " MODIFY ID %d: %s - new values ",
               id, shape_name(orig->type));
     wrefresh(win_cmd);
 
@@ -455,9 +423,6 @@ static void do_modify(void)
     ui_refresh();
 }
 
-/* ================================================================== */
-/*  do_list                                                            */
-/* ================================================================== */
 static void do_list(void)
 {
     werase(win_cmd);
@@ -501,9 +466,6 @@ static void do_list(void)
     wgetch(win_cmd);
 }
 
-/* ================================================================== */
-/*  menu_run                                                           */
-/* ================================================================== */
 void menu_run(void)
 {
     int selected = 0;
@@ -511,7 +473,7 @@ void menu_run(void)
     status_msg("Use arrow keys or number keys. Enter = select.");
     draw_main_menu(selected);
 
-    while (1) {
+    for (;;) {
         int key = wgetch(win_cmd);
 
         switch (key) {
@@ -521,14 +483,12 @@ void menu_run(void)
         case KEY_DOWN:
             selected = (selected + 1) % MENU_ITEMS;
             break;
-
         case '1': selected = 0; goto execute;
         case '2': selected = 1; goto execute;
         case '3': selected = 2; goto execute;
         case '4': selected = 3; goto execute;
         case '5': selected = 4; goto execute;
         case '6': case 'q': case 'Q': return;
-
         case '\n': case KEY_ENTER:
 execute:
             switch (selected) {
