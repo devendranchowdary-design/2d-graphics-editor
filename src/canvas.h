@@ -3,7 +3,7 @@
 
 #include <ncurses.h>
 
-#define ROWS    12
+#define ROWS    10
 #define COLS    76
 #define BORDER_CHAR '|'
 

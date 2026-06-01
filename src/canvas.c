@@ -32,12 +32,9 @@ char canvas_get(int row, int col)
 /* ------------------------------------------------------------------ */
 void canvas_display(WINDOW *win, int win_row, int win_col)
 {
-    /* Draw border */
     for (int r = 0; r < ROWS; r++) {
-        mvwprintw(win, win_row + r, win_col, "|");
         for (int c = 0; c < COLS; c++)
-            mvwaddch(win, win_row + r, win_col + 1 + c, canvas[r][c]);
-        mvwprintw(win, win_row + r, win_col + 1 + COLS, "|");
+            mvwaddch(win, win_row + r, win_col + c, canvas[r][c]);
     }
 }
 

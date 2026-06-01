@@ -29,7 +29,7 @@ static WINDOW *win_cmd     = NULL;
 
 #define TITLE_ROWS   1
 #define STATUS_ROWS  1
-#define CMD_ROWS     8   /* command / input area height */
+#define CMD_ROWS     10  /* command / input area height */
 
 /* ------------------------------------------------------------------ */
 /*  Forward declarations                                               */
@@ -235,14 +235,14 @@ static void draw_main_menu(int selected)
     for (int i = 0; i < MENU_ITEMS; i++) {
         if (i == selected) {
             wattron(win_cmd, COLOR_PAIR(4) | A_BOLD | A_REVERSE);
-            mvwprintw(win_cmd, 2 + i, 4, "  %-30s", menu_labels[i]);
+            mvwprintw(win_cmd, 1 + i, 4, "  %-30s", menu_labels[i]);
             wattroff(win_cmd, COLOR_PAIR(4) | A_BOLD | A_REVERSE);
         } else {
-            mvwprintw(win_cmd, 2 + i, 4, "  %-30s", menu_labels[i]);
+            mvwprintw(win_cmd, 1 + i, 4, "  %-30s", menu_labels[i]);
         }
     }
     mvwprintw(win_cmd, CMD_ROWS - 2, 2,
-        "Arrow keys / number key to select, Enter to confirm");
+        "Arrow keys / 1-6 to select, Enter to confirm");
     wrefresh(win_cmd);
 }
 
