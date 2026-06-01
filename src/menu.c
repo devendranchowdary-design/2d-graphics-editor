@@ -29,7 +29,7 @@ static WINDOW *win_cmd     = NULL;
 
 #define TITLE_ROWS   1
 #define STATUS_ROWS  1
-#define CMD_ROWS     12   /* command / input area height */
+#define CMD_ROWS     8   /* command / input area height */
 
 /* ------------------------------------------------------------------ */
 /*  Forward declarations                                               */
@@ -67,7 +67,19 @@ void menu_init(void)
 
     int max_r, max_c;
     getmaxyx(stdscr, max_r, max_c);
-    (void)max_r; (void)max_c;
+
+    /* Check minimum terminal size */
+    int need_rows = TITLE_ROWS + ROWS + 2 + STATUS_ROWS + CMD_ROWS;
+    int need_cols = COLS + 2;
+    if (max_r < need_rows || max_c < need_cols) {
+        endwin();
+        printf("ERROR: Terminal too small!\n");
+        printf("  Your terminal : %d rows x %d cols\n", max_r, max_c);
+        printf("  Minimum needed: %d rows x %d cols\n", need_rows, need_cols);
+        printf("Please resize your terminal window and try again.\n");
+        exit(1);
+    }
+
 
     /* Title bar */
     win_title = newwin(TITLE_ROWS, COLS + 2, 0, 0);

@@ -3,8 +3,8 @@
 
 #include <ncurses.h>
 
-#define ROWS    40
-#define COLS    120
+#define ROWS    12
+#define COLS    76
 #define BORDER_CHAR '|'
 
 /* The 2-D character canvas */
