@@ -1,12 +1,11 @@
 /*
  * menu.c  —  ncurses-based interactive UI for the 2-D Graphics Editor
  *
- * Layout:
- *   +----------- Title bar (1 row) -----------+
- *   |         Canvas  (ROWS+2 rows)            |
- *   +----------  Status bar (1 row) -----------+
- *   |         Command area  (rest)             |
- *   +------------------------------------------+
+ * Layout (fits standard 24x80 terminal):
+ *   Title  (1 row)
+ *   Canvas (ROWS+2 rows)
+ *   Status (1 row)
+ *   CMD    (CMD_ROWS rows)
  */
 
 #include "menu.h"
@@ -29,15 +28,16 @@ static WINDOW *win_cmd     = NULL;
 
 #define TITLE_ROWS   1
 #define STATUS_ROWS  1
-#define CMD_ROWS     10  /* command / input area height */
+#define CMD_ROWS     10
 
 /* ------------------------------------------------------------------ */
 /*  Forward declarations                                               */
 /* ------------------------------------------------------------------ */
 static void ui_refresh(void);
 static void status_msg(const char *msg);
-static int  prompt_int(const char *label, int *out);
-static int  prompt_char(const char *label, char *out);
+static int  prompt_int_at(int row, const char *label, int *out);
+static int  pick_from_list(const char *title, const char **items,
+                           int n, int *chosen);
 static void do_add(void);
 static void do_delete(void);
 static void do_modify(void);
@@ -53,22 +53,20 @@ void menu_init(void)
     cbreak();
     noecho();
     keypad(stdscr, TRUE);
-    curs_set(0);            /* hide cursor by default */
+    curs_set(0);
 
-    /* Colour */
     if (has_colors()) {
         start_color();
-        init_pair(1, COLOR_CYAN,    COLOR_BLACK);   /* title        */
-        init_pair(2, COLOR_WHITE,   COLOR_BLACK);   /* canvas       */
-        init_pair(3, COLOR_YELLOW,  COLOR_BLACK);   /* status       */
-        init_pair(4, COLOR_GREEN,   COLOR_BLACK);   /* selected item*/
-        init_pair(5, COLOR_MAGENTA, COLOR_BLACK);   /* shape char   */
+        init_pair(1, COLOR_CYAN,    COLOR_BLACK);
+        init_pair(2, COLOR_WHITE,   COLOR_BLACK);
+        init_pair(3, COLOR_YELLOW,  COLOR_BLACK);
+        init_pair(4, COLOR_GREEN,   COLOR_BLACK);
+        init_pair(5, COLOR_MAGENTA, COLOR_BLACK);
     }
 
     int max_r, max_c;
     getmaxyx(stdscr, max_r, max_c);
 
-    /* Check minimum terminal size */
     int need_rows = TITLE_ROWS + ROWS + 2 + STATUS_ROWS + CMD_ROWS;
     int need_cols = COLS + 2;
     if (max_r < need_rows || max_c < need_cols) {
@@ -80,24 +78,19 @@ void menu_init(void)
         exit(1);
     }
 
-
-    /* Title bar */
-    win_title = newwin(TITLE_ROWS, COLS + 2, 0, 0);
+    win_title  = newwin(TITLE_ROWS, COLS + 2, 0, 0);
     wbkgd(win_title, COLOR_PAIR(1) | A_BOLD);
 
-    /* Canvas window: ROWS tall, COLS+2 wide (borders) */
     win_canvas = newwin(ROWS + 2, COLS + 2, TITLE_ROWS, 0);
     wbkgd(win_canvas, COLOR_PAIR(2));
 
-    /* Status bar */
     int canvas_bottom = TITLE_ROWS + ROWS + 2;
     win_status = newwin(STATUS_ROWS, COLS + 2, canvas_bottom, 0);
     wbkgd(win_status, COLOR_PAIR(3) | A_BOLD);
 
-    /* Command / input area */
     win_cmd = newwin(CMD_ROWS, COLS + 2, canvas_bottom + STATUS_ROWS, 0);
     wbkgd(win_cmd, COLOR_PAIR(2));
-    keypad(win_cmd, TRUE);   /* Enable arrow keys on the input window */
+    keypad(win_cmd, TRUE);
 
     canvas_init();
     ui_refresh();
@@ -116,27 +109,22 @@ void menu_cleanup(void)
 }
 
 /* ================================================================== */
-/*  ui_refresh  —  redraw everything                                  */
+/*  ui_refresh                                                         */
 /* ================================================================== */
 static void ui_refresh(void)
 {
-    /* Title */
     werase(win_title);
     mvwprintw(win_title, 0, 1,
         "  2D ASCII Graphics Editor   "
         "[* and _ chars]   Objects: %d", obj_count);
     wrefresh(win_title);
 
-    /* Canvas box + content */
     werase(win_canvas);
     box(win_canvas, 0, 0);
     canvas_display(win_canvas, 1, 1);
     wrefresh(win_canvas);
 
-    /* Status */
     wrefresh(win_status);
-
-    /* Command area */
     wrefresh(win_cmd);
 }
 
@@ -151,37 +139,42 @@ static void status_msg(const char *msg)
 }
 
 /* ================================================================== */
-/*  prompt_int  — read an integer from win_cmd                        */
-/*  Returns 1 on success, 0 on ESC / empty input                      */
+/*  prompt_int_at                                                      */
+/*  Draws label at a specific ROW in win_cmd, reads an integer there. */
+/*  Each call gets its own row — no overlap.                           */
+/*  Returns 1 on success, 0 on ESC.                                    */
 /* ================================================================== */
-static int prompt_int(const char *label, int *out)
+static int prompt_int_at(int row, const char *label, int *out)
 {
-    char buf[32] = {0};
+    char buf[16] = {0};
     int  pos     = 0;
+    int  label_len = (int)strlen(label) + 4;  /* "  label: " */
+
+    /* Draw label on its row */
+    mvwprintw(win_cmd, row, 2, "  %-24s: ", label);
+    wrefresh(win_cmd);
 
     echo();
     curs_set(1);
-    wprintw(win_cmd, "  %s: ", label);
+    wmove(win_cmd, row, 2 + label_len);
     wrefresh(win_cmd);
 
     int ch;
-    while ((ch = wgetch(win_cmd)) != '\n') {
-        if (ch == 27) {          /* ESC */
-            noecho(); curs_set(0);
-            return 0;
+    while ((ch = wgetch(win_cmd)) != '\n' && ch != KEY_ENTER) {
+        if (ch == 27) {                              /* ESC */
+            noecho(); curs_set(0); return 0;
         }
         if ((ch == KEY_BACKSPACE || ch == 127) && pos > 0) {
             buf[--pos] = '\0';
-            /* Move back, erase, re-print */
-            int r, c;
-            getyx(win_cmd, r, c);
-            (void)r;
-            mvwaddch(win_cmd, getcury(win_cmd), c - 1, ' ');
-            wmove(win_cmd, getcury(win_cmd), c - 1);
+            int cx = getcurx(win_cmd);
+            mvwaddch(win_cmd, row, cx - 1, ' ');
+            wmove(win_cmd, row, cx - 1);
             wrefresh(win_cmd);
-        } else if ((pos < 30 && (ch >= '0' && ch <= '9')) ||
+        } else if ((pos < 5 && ch >= '0' && ch <= '9') ||
                    (pos == 0 && ch == '-')) {
             buf[pos++] = (char)ch;
+            waddch(win_cmd, (chtype)ch);
+            wrefresh(win_cmd);
         }
     }
     noecho();
@@ -189,29 +182,54 @@ static int prompt_int(const char *label, int *out)
 
     if (pos == 0) return 0;
     *out = atoi(buf);
+
+    /* Show entered value in green to confirm */
+    wattron(win_cmd, COLOR_PAIR(4) | A_BOLD);
+    mvwprintw(win_cmd, row, 2 + label_len, "%-6d", *out);
+    wattroff(win_cmd, COLOR_PAIR(4) | A_BOLD);
+    wrefresh(win_cmd);
+
     return 1;
 }
 
 /* ================================================================== */
-/*  prompt_char — read a single character (fill char)                 */
+/*  pick_from_list                                                     */
+/*  Arrow-key + number-key selectable list in win_cmd.                */
+/*  Returns 1 and sets *chosen (0-based) on Enter. 0 on ESC.          */
 /* ================================================================== */
-static int prompt_char(const char *label, char *out)
+static int pick_from_list(const char *title, const char **items,
+                          int n, int *chosen)
 {
-    echo();
-    curs_set(1);
-    wprintw(win_cmd, "  %s [* or _]: ", label);
-    wrefresh(win_cmd);
+    int sel = (*chosen < n) ? *chosen : 0;
 
-    int ch = wgetch(win_cmd);
-    noecho();
-    curs_set(0);
+    while (1) {
+        werase(win_cmd);
+        box(win_cmd, 0, 0);
+        mvwprintw(win_cmd, 0, 2, " %s ", title);
 
-    if (ch == 27) return 0;
-    if (ch != '*' && ch != '_') ch = '*';
-    *out = (char)ch;
-    wprintw(win_cmd, "%c\n", *out);
-    wrefresh(win_cmd);
-    return 1;
+        for (int i = 0; i < n && i < CMD_ROWS - 3; i++) {
+            if (i == sel) {
+                wattron(win_cmd, COLOR_PAIR(4) | A_BOLD | A_REVERSE);
+                mvwprintw(win_cmd, 1 + i, 3, "  %-44s", items[i]);
+                wattroff(win_cmd, COLOR_PAIR(4) | A_BOLD | A_REVERSE);
+            } else {
+                mvwprintw(win_cmd, 1 + i, 3, "  %-44s", items[i]);
+            }
+        }
+        mvwprintw(win_cmd, CMD_ROWS - 2, 2,
+            "Arrow/number to select, Enter=OK, ESC=cancel");
+        wrefresh(win_cmd);
+
+        int key = wgetch(win_cmd);
+        if (key == 27) return 0;
+        if (key == KEY_UP)   sel = (sel - 1 + n) % n;
+        if (key == KEY_DOWN) sel = (sel + 1) % n;
+        if (key == '\n' || key == KEY_ENTER) { *chosen = sel; return 1; }
+        if (key >= '1' && key <= '9') {
+            int idx = key - '1';
+            if (idx < n) { *chosen = idx; return 1; }
+        }
+    }
 }
 
 /* ================================================================== */
@@ -248,39 +266,30 @@ static void draw_main_menu(int selected)
 }
 
 /* ================================================================== */
-/*  do_add  —  add a new shape                                        */
+/*  do_add                                                             */
 /* ================================================================== */
 static const char *shape_labels[4] = {
     "1. Circle", "2. Rectangle", "3. Line", "4. Triangle"
 };
+static const char *fill_labels[2] = {
+    "* (asterisk)", "_ (underscore)"
+};
 
 static void do_add(void)
 {
-    /* Pick shape type */
-    werase(win_cmd);
-    box(win_cmd, 0, 0);
-    mvwprintw(win_cmd, 0, 2, " ADD SHAPE ");
-    for (int i = 0; i < 4; i++)
-        mvwprintw(win_cmd, 2 + i, 4, "%s", shape_labels[i]);
-    mvwprintw(win_cmd, CMD_ROWS - 2, 2, "Press 1-4 to select shape type:");
-    wrefresh(win_cmd);
-
-    int key = wgetch(win_cmd);
-    ShapeType stype;
-    switch (key) {
-    case '1': stype = CIRCLE;    break;
-    case '2': stype = RECTANGLE; break;
-    case '3': stype = LINE;      break;
-    case '4': stype = TRIANGLE;  break;
-    default:
-        status_msg("Cancelled.");
+    /* Step 1: pick shape type with arrow keys */
+    int choice = 0;
+    if (!pick_from_list("ADD SHAPE — choose type", shape_labels, 4, &choice)) {
+        status_msg("Add cancelled.");
         return;
     }
+    ShapeType stype = (ShapeType)choice;
 
+    /* Step 2: enter parameters — each on its own row */
     werase(win_cmd);
     box(win_cmd, 0, 0);
-    mvwprintw(win_cmd, 0, 2, " ADD: %s ", shape_name(stype));
-    wmove(win_cmd, 2, 2);
+    mvwprintw(win_cmd, 0, 2, " ADD: %s — enter coordinates ",
+              shape_name(stype));
     wrefresh(win_cmd);
 
     Shape s;
@@ -289,82 +298,61 @@ static void do_add(void)
     s.fill_char = '*';
 
     int ok = 1;
-
     switch (stype) {
     case CIRCLE:
-        mvwprintw(win_cmd, 1, 2,
-            "Enter center col (x), row (y), radius");
-        wmove(win_cmd, 2, 2); wrefresh(win_cmd);
-        ok = prompt_int("Center col (x)", &s.x1) &&
-             prompt_int("Center row (y)", &s.y1) &&
-             prompt_int("Radius",         &s.radius);
+        /* rows 1, 2, 3 — one per field */
+        ok = prompt_int_at(1, "Center col x (0-75)", &s.x1) &&
+             prompt_int_at(2, "Center row y (0-9)",  &s.y1) &&
+             prompt_int_at(3, "Radius",              &s.radius);
         break;
-
     case RECTANGLE:
-        mvwprintw(win_cmd, 1, 2,
-            "Enter top-left col,row then bottom-right col,row");
-        wmove(win_cmd, 2, 2); wrefresh(win_cmd);
-        ok = prompt_int("Top-left  col (x1)", &s.x1) &&
-             prompt_int("Top-left  row (y1)", &s.y1) &&
-             prompt_int("Bot-right col (x2)", &s.x2) &&
-             prompt_int("Bot-right row (y2)", &s.y2);
+        ok = prompt_int_at(1, "Top-left  x1 (0-75)", &s.x1) &&
+             prompt_int_at(2, "Top-left  y1 (0-9)",  &s.y1) &&
+             prompt_int_at(3, "Bot-right x2 (0-75)", &s.x2) &&
+             prompt_int_at(4, "Bot-right y2 (0-9)",  &s.y2);
         break;
-
     case LINE:
-        mvwprintw(win_cmd, 1, 2,
-            "Enter start col,row then end col,row");
-        wmove(win_cmd, 2, 2); wrefresh(win_cmd);
-        ok = prompt_int("Start col (x1)", &s.x1) &&
-             prompt_int("Start row (y1)", &s.y1) &&
-             prompt_int("End   col (x2)", &s.x2) &&
-             prompt_int("End   row (y2)", &s.y2);
+        ok = prompt_int_at(1, "Start x1 (0-75)", &s.x1) &&
+             prompt_int_at(2, "Start y1 (0-9)",  &s.y1) &&
+             prompt_int_at(3, "End   x2 (0-75)", &s.x2) &&
+             prompt_int_at(4, "End   y2 (0-9)",  &s.y2);
         break;
-
     case TRIANGLE:
-        mvwprintw(win_cmd, 1, 2,
-            "Enter three vertices (col, row) each");
-        wmove(win_cmd, 2, 2); wrefresh(win_cmd);
-        ok = prompt_int("V1 col (x1)", &s.x1) &&
-             prompt_int("V1 row (y1)", &s.y1) &&
-             prompt_int("V2 col (x2)", &s.x2) &&
-             prompt_int("V2 row (y2)", &s.y2) &&
-             prompt_int("V3 col (x3)", &s.x3) &&
-             prompt_int("V3 row (y3)", &s.y3);
+        ok = prompt_int_at(1, "V1 x1 (0-75)", &s.x1) &&
+             prompt_int_at(2, "V1 y1 (0-9)",  &s.y1) &&
+             prompt_int_at(3, "V2 x2 (0-75)", &s.x2) &&
+             prompt_int_at(4, "V2 y2 (0-9)",  &s.y2) &&
+             prompt_int_at(5, "V3 x3 (0-75)", &s.x3) &&
+             prompt_int_at(6, "V3 y3 (0-9)",  &s.y3);
         break;
     }
-
     if (!ok) { status_msg("Add cancelled."); return; }
 
-    /* Choose fill character */
-    if (!prompt_char("Fill char", &s.fill_char)) {
+    /* Step 3: pick fill char */
+    int fc = 0;
+    if (!pick_from_list("Choose fill character", fill_labels, 2, &fc)) {
         status_msg("Add cancelled.");
         return;
     }
+    s.fill_char = (fc == 0) ? '*' : '_';
 
     int id = obj_add(&s);
-    if (id < 0) {
-        status_msg("ERROR: object list full!");
-        return;
-    }
+    if (id < 0) { status_msg("ERROR: object list full!"); return; }
 
-    /* Draw onto canvas */
     switch (stype) {
     case CIRCLE:
-        draw_circle(s.y1, s.x1, s.radius, s.fill_char);
-        break;
+        draw_circle(s.y1, s.x1, s.radius, s.fill_char); break;
     case RECTANGLE:
-        draw_rectangle(s.y1, s.x1, s.y2, s.x2, s.fill_char);
-        break;
+        draw_rectangle(s.y1, s.x1, s.y2, s.x2, s.fill_char); break;
     case LINE:
-        draw_line(s.y1, s.x1, s.y2, s.x2, s.fill_char);
-        break;
+        draw_line(s.y1, s.x1, s.y2, s.x2, s.fill_char); break;
     case TRIANGLE:
-        draw_triangle(s.y1, s.x1, s.y2, s.x2, s.y3, s.x3, s.fill_char);
-        break;
+        draw_triangle(s.y1, s.x1, s.y2, s.x2, s.y3, s.x3, s.fill_char); break;
     }
 
     char msg[64];
-    snprintf(msg, sizeof(msg), "Added %s with ID %d", shape_name(stype), id);
+    snprintf(msg, sizeof(msg), "Added %s (ID %d) with '%c'",
+             shape_name(stype), id, s.fill_char);
     status_msg(msg);
     ui_refresh();
 }
@@ -377,18 +365,16 @@ static void do_delete(void)
     werase(win_cmd);
     box(win_cmd, 0, 0);
     mvwprintw(win_cmd, 0, 2, " DELETE SHAPE ");
-    wmove(win_cmd, 2, 2);
     wrefresh(win_cmd);
 
     int id = 0;
-    if (!prompt_int("Enter object ID to delete", &id)) {
+    if (!prompt_int_at(1, "Object ID to delete", &id)) {
         status_msg("Delete cancelled.");
         return;
     }
-
     if (obj_delete(id) == 0) {
         char msg[64];
-        snprintf(msg, sizeof(msg), "Deleted object ID %d", id);
+        snprintf(msg, sizeof(msg), "Deleted object ID %d.", id);
         status_msg(msg);
     } else {
         status_msg("ERROR: ID not found or already deleted.");
@@ -404,71 +390,64 @@ static void do_modify(void)
     werase(win_cmd);
     box(win_cmd, 0, 0);
     mvwprintw(win_cmd, 0, 2, " MODIFY SHAPE ");
-    wmove(win_cmd, 2, 2);
     wrefresh(win_cmd);
 
     int id = 0;
-    if (!prompt_int("Enter object ID to modify", &id)) {
+    if (!prompt_int_at(1, "Object ID to modify", &id)) {
         status_msg("Modify cancelled.");
         return;
     }
-
     Shape *orig = obj_find(id);
-    if (!orig) {
-        status_msg("ERROR: ID not found.");
-        return;
-    }
+    if (!orig) { status_msg("ERROR: ID not found."); return; }
 
-    /* Start with a copy of the original */
     Shape updated = *orig;
 
     werase(win_cmd);
     box(win_cmd, 0, 0);
-    mvwprintw(win_cmd, 0, 2, " MODIFY ID %d: %s ", id, shape_name(orig->type));
-    mvwprintw(win_cmd, 1, 2, "Enter new values (leave blank for same type):");
-    wmove(win_cmd, 2, 2);
+    mvwprintw(win_cmd, 0, 2, " MODIFY ID %d: %s — new coordinates ",
+              id, shape_name(orig->type));
     wrefresh(win_cmd);
 
     int ok = 1;
-
     switch (orig->type) {
     case CIRCLE:
-        ok = prompt_int("New center col (x)", &updated.x1) &&
-             prompt_int("New center row (y)", &updated.y1) &&
-             prompt_int("New radius",         &updated.radius);
+        ok = prompt_int_at(1, "New center col x", &updated.x1) &&
+             prompt_int_at(2, "New center row y", &updated.y1) &&
+             prompt_int_at(3, "New radius",       &updated.radius);
         break;
     case RECTANGLE:
-        ok = prompt_int("New x1", &updated.x1) &&
-             prompt_int("New y1", &updated.y1) &&
-             prompt_int("New x2", &updated.x2) &&
-             prompt_int("New y2", &updated.y2);
+        ok = prompt_int_at(1, "New x1", &updated.x1) &&
+             prompt_int_at(2, "New y1", &updated.y1) &&
+             prompt_int_at(3, "New x2", &updated.x2) &&
+             prompt_int_at(4, "New y2", &updated.y2);
         break;
     case LINE:
-        ok = prompt_int("New x1", &updated.x1) &&
-             prompt_int("New y1", &updated.y1) &&
-             prompt_int("New x2", &updated.x2) &&
-             prompt_int("New y2", &updated.y2);
+        ok = prompt_int_at(1, "New x1", &updated.x1) &&
+             prompt_int_at(2, "New y1", &updated.y1) &&
+             prompt_int_at(3, "New x2", &updated.x2) &&
+             prompt_int_at(4, "New y2", &updated.y2);
         break;
     case TRIANGLE:
-        ok = prompt_int("New x1", &updated.x1) &&
-             prompt_int("New y1", &updated.y1) &&
-             prompt_int("New x2", &updated.x2) &&
-             prompt_int("New y2", &updated.y2) &&
-             prompt_int("New x3", &updated.x3) &&
-             prompt_int("New y3", &updated.y3);
+        ok = prompt_int_at(1, "New x1", &updated.x1) &&
+             prompt_int_at(2, "New y1", &updated.y1) &&
+             prompt_int_at(3, "New x2", &updated.x2) &&
+             prompt_int_at(4, "New y2", &updated.y2) &&
+             prompt_int_at(5, "New x3", &updated.x3) &&
+             prompt_int_at(6, "New y3", &updated.y3);
         break;
     }
-
     if (!ok) { status_msg("Modify cancelled."); return; }
 
-    if (!prompt_char("New fill char", &updated.fill_char)) {
+    int fc = (orig->fill_char == '_') ? 1 : 0;
+    if (!pick_from_list("Choose fill character", fill_labels, 2, &fc)) {
         status_msg("Modify cancelled.");
         return;
     }
+    updated.fill_char = (fc == 0) ? '*' : '_';
 
     if (obj_modify(id, &updated) == 0) {
         char msg[64];
-        snprintf(msg, sizeof(msg), "Modified object ID %d", id);
+        snprintf(msg, sizeof(msg), "Modified object ID %d.", id);
         status_msg(msg);
     } else {
         status_msg("ERROR: modify failed.");
@@ -485,38 +464,35 @@ static void do_list(void)
     box(win_cmd, 0, 0);
     mvwprintw(win_cmd, 0, 2, " OBJECT LIST ");
 
-    int row = 1;
-    int shown = 0;
+    int row = 1, shown = 0;
     for (int i = 0; i < obj_count && row < CMD_ROWS - 2; i++) {
         Shape *s = &objects[i];
         if (!s->alive) continue;
-
         shown++;
         switch (s->type) {
         case CIRCLE:
             mvwprintw(win_cmd, row++, 2,
-                "ID %2d  CIRCLE     cx=%3d cy=%3d r=%2d  char='%c'",
+                "ID%2d CIRCLE  cx=%2d cy=%2d r=%2d  '%c'",
                 s->id, s->x1, s->y1, s->radius, s->fill_char);
             break;
         case RECTANGLE:
             mvwprintw(win_cmd, row++, 2,
-                "ID %2d  RECT       (%3d,%3d)->(%3d,%3d)  char='%c'",
+                "ID%2d RECT    (%2d,%2d)->(%2d,%2d)  '%c'",
                 s->id, s->x1, s->y1, s->x2, s->y2, s->fill_char);
             break;
         case LINE:
             mvwprintw(win_cmd, row++, 2,
-                "ID %2d  LINE       (%3d,%3d)->(%3d,%3d)  char='%c'",
+                "ID%2d LINE    (%2d,%2d)->(%2d,%2d)  '%c'",
                 s->id, s->x1, s->y1, s->x2, s->y2, s->fill_char);
             break;
         case TRIANGLE:
             mvwprintw(win_cmd, row++, 2,
-                "ID %2d  TRIANGLE   (%d,%d) (%d,%d) (%d,%d)  char='%c'",
+                "ID%2d TRI     (%2d,%2d) (%2d,%2d) (%2d,%2d)  '%c'",
                 s->id, s->x1, s->y1, s->x2, s->y2,
                 s->x3, s->y3, s->fill_char);
             break;
         }
     }
-
     if (shown == 0)
         mvwprintw(win_cmd, 2, 4, "(no objects on canvas)");
 
@@ -539,7 +515,6 @@ void menu_run(void)
         int key = wgetch(win_cmd);
 
         switch (key) {
-        /* Arrow navigation */
         case KEY_UP:
             selected = (selected - 1 + MENU_ITEMS) % MENU_ITEMS;
             break;
@@ -547,14 +522,12 @@ void menu_run(void)
             selected = (selected + 1) % MENU_ITEMS;
             break;
 
-        /* Number shortcuts */
         case '1': selected = 0; goto execute;
         case '2': selected = 1; goto execute;
         case '3': selected = 2; goto execute;
         case '4': selected = 3; goto execute;
         case '5': selected = 4; goto execute;
-        case '6': case 'q': case 'Q':
-            return;   /* Quit */
+        case '6': case 'q': case 'Q': return;
 
         case '\n': case KEY_ENTER:
 execute:
@@ -565,13 +538,13 @@ execute:
             case 3: do_list();   break;
             case 4:
                 canvas_init();
-                /* Mark all objects as deleted */
                 for (int i = 0; i < obj_count; i++)
                     objects[i].alive = 0;
+                obj_count = 0;
                 status_msg("Canvas cleared.");
                 ui_refresh();
                 break;
-            case 5: return;    /* Quit */
+            case 5: return;
             }
             break;
         }
